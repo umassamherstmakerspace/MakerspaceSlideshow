@@ -31,38 +31,67 @@
 	let currentImageURL = '';
 	let nextImageURL = '';
 	let showImage = false;
+	let booted = false;
+	let lastImageSwap = Date.now();
 
 	let schedule: DaySchedule[] = [];
 	let roomStatus: RoomStatus = { open: false, until: '' };
 
 	async function queueNextImage() {
-		if (imagesShown >= $page.data.imageReloadEvery) {
-			await load();
-			return;
-		}
-
-		imagesShown++;
-		const validImages: string[] = [];
-		imageLoopDelayMap.forEach((v, k) => {
-			if (v <= 0) {
-				validImages.push(k);
-			} else {
-				imageLoopDelayMap.set(k, v - 1);
-			}
-		});
-
-		const image = validImages[Math.floor(Math.random() * validImages.length)];
-
 		try {
-			let res = await fetch(image);
-			let blob = await res.blob();
+			// (Re)load the image list on first run and every imageReloadEvery images.
+			// This used to live in load() with no error handling: one failed fetch
+			// killed the loop permanently (the frozen-photo bug).
+			if (images.length === 0 || imagesShown >= $page.data.imageReloadEvery) {
+				images = await getImages();
+				imagesShown = 0;
+				imageLoopDelayMap = new Map<string, number>();
+				images.forEach((i) => imageLoopDelayMap.set(i, 0));
+			}
+
+			imagesShown++;
+			const validImages: string[] = [];
+			imageLoopDelayMap.forEach((v, k) => {
+				if (v <= 0) {
+					validImages.push(k);
+				} else {
+					imageLoopDelayMap.set(k, v - 1);
+				}
+			});
+
+			// Small library: every image can be on cooldown at once. Reset instead
+			// of picking undefined (which blanked the panel).
+			if (validImages.length === 0) {
+				imageLoopDelayMap.forEach((_, k) => {
+					imageLoopDelayMap.set(k, 0);
+					validImages.push(k);
+				});
+			}
+
+			if (validImages.length === 0) {
+				throw new Error('image list is empty');
+			}
+
+			const image = validImages[Math.floor(Math.random() * validImages.length)];
+
+			const res = await fetch(image);
+			if (!res.ok) {
+				throw new Error(`image fetch failed: ${res.status}`);
+			}
+			const blob = await res.blob();
 			imageLoopDelayMap.set(image, $page.data.imageLoopDelay);
 
 			nextImageURL = URL.createObjectURL(blob);
 			showImage = false;
+
+			if (!booted) {
+				booted = true;
+				fadeInNextImage();
+			}
 		} catch (e) {
+			// Never let the loop die: keep the current image up and retry.
 			console.error(e);
-			await queueNextImage();
+			window.setTimeout(queueNextImage, $page.data.imageHoldTime);
 		}
 	}
 
@@ -72,6 +101,7 @@
 		URL.revokeObjectURL(currentImageURL);
 		currentImageURL = nextImageURL;
 		showImage = true;
+		lastImageSwap = Date.now();
 	}
 
 	function getDaySchedule(data: EventJSON[]): DaySchedule[] {
@@ -234,18 +264,25 @@
 		}
 	}
 
-	async function load() {
-		images = await getImages();
-		imagesShown = 0;
-		imageLoopDelayMap = new Map<string, number>();
-		images.forEach((i) => imageLoopDelayMap.set(i, 0));
-		await queueNextImage();
-		fadeInNextImage();
-		updateHours();
-	}
-
 	onMount(() => {
-		load();
+		// queueNextImage self-retries until the first image is up, then the
+		// intro/outro transition events drive the loop.
+		queueNextImage();
+
+		// Started exactly once. It used to be (re)started by every image-list
+		// reload, leaking a new self-rescheduling timer chain each time.
+		updateHours();
+
+		// Watchdog: if no image swap happens for far longer than the slide
+		// period, something above has wedged — reload the whole page.
+		const slidePeriod =
+			$page.data.imageHoldTime + $page.data.imageFadeInTime + $page.data.imageFadeOutTime;
+		const watchdogLimit = Math.max(10 * slidePeriod, 10 * 60 * 1000);
+		window.setInterval(() => {
+			if (Date.now() - lastImageSwap > watchdogLimit) {
+				location.reload();
+			}
+		}, 60 * 1000);
 	});
 </script>
 
