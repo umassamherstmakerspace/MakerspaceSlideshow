@@ -277,9 +277,13 @@ export class Event {
 			);
 		}
 
-		if (event.RDATE) {
+		if (event.RDATE && event.RDATE.propertyList) {
 			useRrule = true;
-			throw new Error('RDATE not supported');
+			event.RDATE.propertyList.forEach((rdates) => {
+				rdates.value.forEach((rdate) => {
+					rrules.rdate(floatingTZAdjust(rdate));
+				});
+			});
 		}
 
 		if (event.EXDATE && event.EXDATE.propertyList) {
