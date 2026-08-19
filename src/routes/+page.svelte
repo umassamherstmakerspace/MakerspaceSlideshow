@@ -1,22 +1,22 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
-	import type { DateRange, DaySchedule, RoomStatus, ScheduleRanges } from '$lib/types';
+	import type { DaySchedule, RoomStatus } from '$lib/types';
 	import type { EventJSON } from '$lib/calendar';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { addDays, format, startOfDay } from 'date-fns';
 	import {
-		addDays,
-		format,
-		startOfDay,
-		isAfter,
-		isBefore,
-		max,
-		min,
-		endOfDay,
-		isEqual,
-		isWithinInterval,
-		formatRelative
-	} from 'date-fns';
+		decodeHoursCache,
+		encodeHoursCache,
+		getDaySchedule,
+		getRoomStatus,
+		getScheduleRanges,
+		isEventJSONList
+	} from '$lib/hours';
+
+	const HOURS_CACHE_KEY = 'makerspace-hours-v1';
+	const ROOM_STATUS_UPDATE_TIME = 5 * 1000;
+	type HoursSource = 'loading' | 'live' | 'saved' | 'unavailable';
 
 	async function getImages(): Promise<string[]> {
 		const res = await fetch('/api/images');
@@ -34,8 +34,10 @@
 	let booted = false;
 	let lastImageSwap = Date.now();
 
+	let calendarEvents: EventJSON[] | null = null;
 	let schedule: DaySchedule[] = [];
-	let roomStatus: RoomStatus = { open: false, until: '' };
+	let roomStatus: RoomStatus | null = null;
+	let hoursSource: HoursSource = 'loading';
 
 	async function queueNextImage() {
 		try {
@@ -104,143 +106,33 @@
 		lastImageSwap = Date.now();
 	}
 
-	function getDaySchedule(data: EventJSON[]): DaySchedule[] {
-		const now = new Date();
-		const startTime = startOfDay(now);
-		const endTime = addDays(startTime, 7);
-
-		const ranges = Array<DateRange[]>(7);
-		for (let i = 0; i < 7; i++) {
-			ranges[i] = [];
-		}
-
-		return data
-			.filter((e) => {
-				return e.title.toLowerCase().includes('open');
-			})
-			.map((e) => {
-				return {
-					start: max([new Date(e.start), startTime]),
-					end: min([new Date(e.end), endTime])
-				} as DateRange;
-			})
-			.filter((e) => {
-				if (isBefore(e.end, startTime)) {
-					return false;
-				}
-
-				if (isAfter(e.start, endTime)) {
-					return false;
-				}
-
-				return true;
-			})
-			.flatMap((e) => {
-				let start = e.start;
-				const results = [];
-
-				while (start.getDay() !== e.end.getDay()) {
-					results.push({
-						start: start,
-						end: endOfDay(start)
-					} as DateRange);
-					start = startOfDay(addDays(start, 1));
-				}
-
-				results.push({
-					start: start,
-					end: e.end
-				} as DateRange);
-
-				return results;
-			})
-			.reduce((acc, e) => {
-				const offset = (e.start.getDay() - now.getDay() + 7) % 7;
-				acc[offset].push(e);
-
-				return acc;
-			}, ranges)
-			.map((e) => {
-				e = e.sort((a, b) => {
-					return isBefore(a.start, b.start) ? -1 : 1;
-				});
-
-				if (e.length <= 1) {
-					return e;
-				}
-
-				let index = 0;
-
-				while (index < e.length) {
-					for (let i = index + 1; i < e.length; i++) {
-						if (isAfter(e[index].end, e[i].start) || isEqual(e[index].end, e[i].start)) {
-							if (isBefore(e[index].end, e[i].end) || isEqual(e[index].end, e[i].end)) {
-								e[index].end = e[i].end;
-							}
-
-							e.splice(i, 1);
-							i--;
-						}
-					}
-
-					index++;
-				}
-
-				return e;
-			})
-			.map((e, i) => {
-				return {
-					ranges: e.map((e) => {
-						return {
-							start: e.start,
-							end: e.end
-						} as DateRange;
-					}),
-					day: addDays(startTime, i)
-				} as DaySchedule;
-			});
+	function refreshRoomStatus() {
+		if (calendarEvents === null) return;
+		roomStatus = getRoomStatus(schedule, new Date());
 	}
 
-	export function getRoomStatus(schedule: DaySchedule[]): RoomStatus {
-		console.log(schedule);
-		const now = new Date();
-
-		for (let i = 0; i < schedule.length; i++) {
-			for (let j = 0; j < schedule[i].ranges.length; j++) {
-				const range = schedule[i].ranges[j];
-				if (isWithinInterval(now, range)) {
-					return {
-						open: true,
-						until: formatRelative(range.end, now)
-					};
-				} else if (isBefore(now, range.start)) {
-					return {
-						open: false,
-						until: formatRelative(range.start, now)
-					};
-				}
-			}
-		}
-
-		return {
-			open: false,
-			until: ''
-		};
+	function useCalendarEvents(events: EventJSON[], source: HoursSource) {
+		calendarEvents = events;
+		schedule = getDaySchedule(events, new Date());
+		hoursSource = source;
+		refreshRoomStatus();
 	}
 
-	export function getScheduleRanges(schedule: DaySchedule[]): ScheduleRanges[] {
-		return schedule.map((e) => {
-			if (e.ranges.length === 0) {
-				return { day: e.day, ranges: ['Closed'] } as ScheduleRanges;
-			}
+	function loadSavedHours() {
+		try {
+			const events = decodeHoursCache(window.localStorage.getItem(HOURS_CACHE_KEY));
+			if (events !== null) useCalendarEvents(events, 'saved');
+		} catch (e) {
+			console.error('Unable to load saved hallway hours', e);
+		}
+	}
 
-			return {
-				day: e.day,
-				ranges: e.ranges.map((e) => {
-					return `${format(e.start, 'h:mm a')} - ${format(e.end, 'h:mm a')}`;
-				})
-			} as ScheduleRanges;
-		});
+	function saveHours(events: EventJSON[]) {
+		try {
+			window.localStorage.setItem(HOURS_CACHE_KEY, encodeHoursCache(events));
+		} catch (e) {
+			console.error('Unable to save hallway hours', e);
+		}
 	}
 
 	async function updateHours() {
@@ -251,20 +143,26 @@
 			const res = await fetch(
 				'/api/calendar?start=' + startTime.toISOString() + '&end=' + endTime.toISOString()
 			);
-			const data = (await res.json()) as EventJSON[];
+			if (!res.ok) throw new Error(`calendar fetch failed: ${res.status}`);
 
-			schedule = getDaySchedule(data);
+			const data: unknown = await res.json();
+			if (!isEventJSONList(data)) throw new Error('calendar response is invalid');
 
-			roomStatus = getRoomStatus(schedule);
+			useCalendarEvents(data, 'live');
+			saveHours(data);
 
 			window.setTimeout(updateHours, $page.data.calendarUpdateTime);
 		} catch (e) {
 			console.error(e);
+			hoursSource = calendarEvents === null ? 'unavailable' : 'saved';
+			refreshRoomStatus();
 			window.setTimeout(updateHours, $page.data.calendarRetryTime);
 		}
 	}
 
 	onMount(() => {
+		loadSavedHours();
+
 		// queueNextImage self-retries until the first image is up, then the
 		// intro/outro transition events drive the loop.
 		queueNextImage();
@@ -273,16 +171,25 @@
 		// reload, leaking a new self-rescheduling timer chain each time.
 		updateHours();
 
+		// OPEN/CLOSED is a local clock calculation. Keep it independent of the
+		// five-minute network refresh so two displays cannot disagree at a boundary.
+		const roomStatusTimer = window.setInterval(refreshRoomStatus, ROOM_STATUS_UPDATE_TIME);
+
 		// Watchdog: if no image swap happens for far longer than the slide
 		// period, something above has wedged — reload the whole page.
 		const slidePeriod =
 			$page.data.imageHoldTime + $page.data.imageFadeInTime + $page.data.imageFadeOutTime;
 		const watchdogLimit = Math.max(10 * slidePeriod, 10 * 60 * 1000);
-		window.setInterval(() => {
+		const watchdogTimer = window.setInterval(() => {
 			if (Date.now() - lastImageSwap > watchdogLimit) {
 				location.reload();
 			}
 		}, 60 * 1000);
+
+		return () => {
+			window.clearInterval(roomStatusTimer);
+			window.clearInterval(watchdogTimer);
+		};
 	});
 </script>
 
@@ -326,12 +233,21 @@
 		</div>
 		<div class="nowWrapper">
 			<div class="now">
-				{#if roomStatus.open}
+				{#if roomStatus === null}
+					<div class="unknown nowText">
+						{hoursSource === 'unavailable' ? 'HOURS UNAVAILABLE' : 'LOADING HOURS'}
+					</div>
+				{:else if roomStatus.open}
 					<div class="open nowText">OPEN</div>
 				{:else}
 					<div class="closed nowText">CLOSED</div>
 				{/if}
-				<div class="subtitle">until {roomStatus.until}</div>
+				{#if roomStatus !== null && (roomStatus.until || hoursSource === 'saved')}
+					<div class="subtitle">
+						{roomStatus.until ? `until ${roomStatus.until}` : ''}
+						{hoursSource === 'saved' ? ' · saved schedule' : ''}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -433,6 +349,11 @@
 
 	.closed {
 		color: #dc3545;
+	}
+
+	.unknown {
+		color: #6c757d;
+		font-size: 5vh;
 	}
 
 	.subtitle {
