@@ -229,7 +229,10 @@
 	<div class="footer">
 		<div class="logos">
 			<img src="/logo.svg" class="gear" alt="Makerspace Logo" />
-			<img src="/makerspace.png" class="logo" alt="UMass Amherst | Makerspace" />
+			<div class="brandLockup">
+				<img src="/makerspace.png" class="logo" alt="UMass Amherst | Makerspace" />
+				<div class="signageUrl">umass.edu/makerspace</div>
+			</div>
 		</div>
 		<div class="nowWrapper">
 			<div class="now">
@@ -301,46 +304,72 @@
 
 		height: 15dvh;
 		background-color: #f1f3f9;
-		padding: 0 10vmin;
-		display: flex;
-	}
-
-	.footer > * {
-		flex: 1;
-		display: flex;
-		justify-content: center;
+		padding: 0 6vmin;
+		display: grid;
+		grid-template-columns: minmax(0, 1.15fr) minmax(max-content, 0.85fr);
+		gap: 4vw;
 		align-items: center;
 	}
 
 	.logos {
+		height: 100%;
+		min-width: 0;
 		display: flex;
 		flex-direction: row;
 		justify-content: left;
-		gap: 1vw;
+		align-items: center;
+		gap: 1.2vw;
+		overflow: hidden;
 	}
 
 	.gear {
 		object-fit: contain;
-		height: 100%;
+		height: 74%;
+		flex: 0 0 auto;
+	}
+
+	.brandLockup {
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		align-items: flex-start;
 	}
 
 	.logo {
 		object-fit: contain;
-		height: 100%;
-		width: 100%;
-		flex: 1;
+		height: 6.2vh;
+		width: auto;
+		max-width: 100%;
+	}
+
+	.signageUrl {
+		font-size: 3vh;
+		font-weight: normal;
+		line-height: 1;
+		margin-top: 0.55vh;
+		letter-spacing: 0.012em;
+		white-space: nowrap;
+	}
+
+	.nowWrapper {
+		min-width: 0;
+		display: flex;
+		justify-content: flex-end;
+		align-items: center;
 	}
 
 	.now {
 		display: flex;
 		flex-direction: row;
-		justify-content: center;
+		justify-content: flex-end;
 		align-items: center;
-		gap: 2vw;
+		gap: 1.35vw;
+		white-space: nowrap;
 	}
 
 	.nowText {
-		font-size: 8vh;
+		font-size: 7vh;
 	}
 
 	.open {
@@ -357,7 +386,7 @@
 	}
 
 	.subtitle {
-		font-size: 4vh;
+		font-size: 3.25vh;
 	}
 
 	.hours {
