@@ -5,6 +5,8 @@ export interface RoomStatus {
 
 export interface ScheduleRanges {
 	day: Date;
+	weekday: string;
+	date: string;
 	ranges: string[];
 }
 

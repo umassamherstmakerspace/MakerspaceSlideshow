@@ -170,6 +170,10 @@ export function getRoomStatus(schedule: DaySchedule[], now = new Date()): RoomSt
 export function getScheduleRanges(schedule: DaySchedule[]): ScheduleRanges[] {
 	return schedule.map((day) => ({
 		day: day.day,
+		// The date sits next to the weekday so nobody reads the list as a
+		// standing weekly schedule (team decision 2026-10-05).
+		weekday: format(day.day, 'EEEE'),
+		date: format(day.day, 'MMM d'),
 		ranges:
 			day.ranges.length === 0
 				? ['Closed']

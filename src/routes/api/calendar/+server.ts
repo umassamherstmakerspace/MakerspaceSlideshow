@@ -1,30 +1,29 @@
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 import { CalendarSet } from '$lib/calendar';
+import { getRequestedRange } from '$lib/calendarRequest';
 import { Cached } from '$lib/cache';
 import { error } from '@sveltejs/kit';
 
 let calendar: Cached<CalendarSet> | undefined = undefined;
 
 export const GET: RequestHandler = async ({ fetch, url }) => {
+	// Check the request before the calendar setup, so a bad request is a 400
+	// even when the server is misconfigured.
+	const { start, end } = getRequestedRange(url);
+
 	if (!calendar) {
 		const cacheTime = Number.parseInt(env.GOOGLE_CALENDAR_CACHE_TIME || '');
-		if (!Number.isInteger(cacheTime)) error(500, 'Invalid cache time');
+		if (!Number.isInteger(cacheTime)) throw error(500, 'Invalid cache time');
 
 		const calendarURL = env.GOOGLE_CALENDAR_LINK;
-		if (!calendarURL) error(500, 'No calendar URL provided');
+		if (!calendarURL) throw error(500, 'No calendar URL provided');
 
 		calendar = new Cached<CalendarSet>(async () => {
 			const calendarData = await fetch(calendarURL).then((res) => res.text());
 			return CalendarSet.cleanAndParse(calendarData);
 		}, cacheTime);
 	}
-
-	const start = url.searchParams.get('start');
-	if (!start) error(400, 'No start date provided');
-
-	const end = url.searchParams.get('end');
-	if (!end) error(400, 'No end date provided');
 
 	let cal;
 
@@ -33,12 +32,12 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 	} catch (e) {
 		calendar = undefined;
 		console.error(e);
-		error(500, {
+		throw error(500, {
 			message: 'Internal Service Error'
 		});
 	}
 
-	return new Response(JSON.stringify(cal?.between(new Date(start || ''), new Date(end || ''))), {
+	return new Response(JSON.stringify(cal.between(start, end)), {
 		headers: {
 			'content-type': 'application/json;charset=UTF-8'
 		}

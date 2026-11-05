@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { Cached } from '$lib/cache';
+import { getPhotoPrismDownloadToken, PhotoPrismError } from '$lib/photoprism';
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
@@ -7,18 +8,14 @@ let downloadToken: Cached<string> | undefined = undefined;
 
 export const GET: RequestHandler = async ({ params, fetch }) => {
 	if (!downloadToken) {
-		downloadToken = new Cached<string>(async () => {
-			const response = await fetch(`${env.PHOTOPRISM_ENDPOINT}/api/v1/session`, {
-				method: 'GET',
-				mode: 'cors',
-				headers: {
-					Authorization: `Bearer ${env.PHOTOPRISM_TOKEN}`,
-					Accepts: 'application/json'
-				}
-			});
-
-			return (await response.json()).config.downloadToken;
-		}, 60 * 1000);
+		downloadToken = new Cached<string>(
+			() =>
+				getPhotoPrismDownloadToken(fetch, {
+					endpoint: env.PHOTOPRISM_ENDPOINT,
+					token: env.PHOTOPRISM_TOKEN
+				}),
+			60 * 1000
+		);
 	}
 
 	let token;
@@ -27,8 +24,8 @@ export const GET: RequestHandler = async ({ params, fetch }) => {
 	} catch (e) {
 		downloadToken = undefined;
 		console.error(e);
-		error(500, {
-			message: 'Internal Service Error'
+		throw error(502, {
+			message: e instanceof PhotoPrismError ? e.message : 'Internal Service Error'
 		});
 	}
 

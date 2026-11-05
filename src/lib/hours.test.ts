@@ -4,7 +4,9 @@ import type { DaySchedule } from '$lib/types';
 import {
 	decodeHoursCache,
 	encodeHoursCache,
+	getDaySchedule,
 	getRoomStatus,
+	getScheduleRanges,
 	HOURS_CACHE_MAX_AGE_MS,
 	isEventJSONList
 } from '$lib/hours';
@@ -61,5 +63,35 @@ describe('hours cache', () => {
 	it('rejects invalid calendar responses before they replace known hours', () => {
 		expect(isEventJSONList({ message: 'Internal Error' })).toBe(false);
 		expect(isEventJSONList([{ ...event, end: 'not a date' }])).toBe(false);
+	});
+});
+
+describe('getScheduleRanges', () => {
+	it('puts the date next to each weekday', () => {
+		const [friday] = getScheduleRanges([
+			{
+				day: new Date(2026, 9, 16),
+				ranges: [{ start: new Date(2026, 9, 16, 10), end: new Date(2026, 9, 16, 18) }]
+			}
+		]);
+
+		expect(friday.weekday).toBe('Friday');
+		expect(friday.date).toBe('Oct 16');
+		expect(friday.ranges).toEqual(['10:00 AM - 6:00 PM']);
+	});
+
+	it('shows seven consecutive dates, across a month boundary, including closed days', () => {
+		const rows = getScheduleRanges(getDaySchedule([], new Date(2026, 9, 29, 12)));
+
+		expect(rows.map((row) => `${row.weekday} ${row.date}`)).toEqual([
+			'Thursday Oct 29',
+			'Friday Oct 30',
+			'Saturday Oct 31',
+			'Sunday Nov 1',
+			'Monday Nov 2',
+			'Tuesday Nov 3',
+			'Wednesday Nov 4'
+		]);
+		expect(rows.every((row) => row.ranges[0] === 'Closed')).toBe(true);
 	});
 });

@@ -4,7 +4,7 @@
 	import type { EventJSON } from '$lib/calendar';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { addDays, format, startOfDay } from 'date-fns';
+	import { addDays, startOfDay } from 'date-fns';
 	import {
 		decodeHoursCache,
 		encodeHoursCache,
@@ -20,7 +20,11 @@
 
 	async function getImages(): Promise<string[]> {
 		const res = await fetch('/api/images');
-		const data = await res.json();
+		const data = await res.json().catch(() => null);
+		if (!res.ok || !Array.isArray(data?.images)) {
+			// For example "photo list failed: 502 PhotoPrism rejected the token".
+			throw new Error(`photo list failed: ${res.status} ${data?.message || 'no message'}`);
+		}
 		return data.images;
 	}
 
@@ -200,7 +204,10 @@
 			<div class="schedule">
 				{#each getScheduleRanges(schedule) as days}
 					<div class="range">
-						<div class="day">{format(days.day, 'EEEE')}</div>
+						<div class="day">
+							{days.weekday}
+							<span class="date">{days.date}</span>
+						</div>
 						<div class="times">
 							{#each days.ranges as time}
 								<div class="time">{time}</div>
@@ -426,6 +433,13 @@
 	.day {
 		font-size: 4vh;
 		justify-self: left;
+		white-space: nowrap;
+	}
+
+	.date {
+		font-size: 2.6vh;
+		opacity: 0.75;
+		margin-left: 0.4em;
 	}
 
 	.times {
